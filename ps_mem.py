@@ -78,6 +78,7 @@ import time
 import errno
 import os
 import sys
+import datetime
 
 # The following exits cleanly on Ctrl-C or EPIPE
 # while treating other exceptions as before.
@@ -142,7 +143,7 @@ def parse_options():
             'discriminate-by-pid',
             'swap'
         ]
-        opts, args = getopt.getopt(sys.argv[1:], "shtdSp:w:", long_options)
+        opts, args = getopt.getopt(sys.argv[1:], "shtdSp:w:g:", long_options)
     except getopt.GetoptError:
         sys.stderr.write(help())
         sys.exit(3)
@@ -158,6 +159,7 @@ def parse_options():
     show_swap = False
     watch = None
     only_total = False
+    graph = False
 
     for o, a in opts:
         if o in ('-s', '--split-args'):
@@ -177,6 +179,13 @@ def parse_options():
             except:
                 sys.stderr.write(help())
                 sys.exit(3)
+        if o in ('-g',):
+            try:
+                pids_to_show = [int(x) for x in a.split(',')]
+            except:
+                sys.stderr.write(help())
+                sys.exit(3)
+            graph = True
         if o in ('-w',):
             try:
                 watch = int(a)
@@ -190,7 +199,8 @@ def parse_options():
         watch,
         only_total,
         discriminate_by_pid,
-        show_swap
+        show_swap,
+        graph
     )
 
 
@@ -342,13 +352,16 @@ def getCmdName(pid, split_args, discriminate_by_pid):
 
 #The following matches "du -h" output
 #see also human.py
-def human(num, power="Ki", units=None):
+def human(num, power="Ki", units=None, units_display=True):
     if units is None:
         powers = ["Ki", "Mi", "Gi", "Ti"]
         while num >= 1000: #4 digits
             num /= 1024.0
             power = powers[powers.index(power)+1]
-        return "%.1f %sB" % (num, power)
+        if units_display:
+            return "%.1f %sB" % (num, power)
+        else:
+            return "%.1f" % num
     else:
         return "%.f" % ((num * 1024) / units)
 
@@ -571,11 +584,11 @@ def verify_environment(pids_to_show):
 
 def main():
     split_args, pids_to_show, watch, only_total, discriminate_by_pid, \
-    show_swap = parse_options()
+    show_swap, graph = parse_options()
 
     verify_environment(pids_to_show)
 
-    if not only_total:
+    if not only_total and not graph:
         print_header(show_swap, discriminate_by_pid)
 
     if watch is not None:
@@ -599,6 +612,25 @@ def main():
                 sys.stdout.write('Process does not exist anymore.\n')
         except KeyboardInterrupt:
             pass
+    elif graph:
+        f = open("process.csv", "w")
+        f.write("Time,Memory (MiB)\n")
+        try:
+            sorted_cmds = True
+            while sorted_cmds:
+                sorted_cmds, shareds, count, total, swaps, total_swap = \
+                    get_memory_usage(pids_to_show, split_args,
+                                     discriminate_by_pid)
+                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                line = "%s,%s\n" % (now, human(sorted_cmds[0][1], units_display=False))
+                f.write(line)
+                f.flush()
+                time.sleep(1)
+            else:
+                sys.stdout.write('Process does not exist anymore.\n')
+
+        finally:
+            f.close()
     else:
         # This is the default behavior
         sorted_cmds, shareds, count, total, swaps, total_swap = \
